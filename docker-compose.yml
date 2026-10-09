@@ -1,0 +1,39 @@
+# Three containers: Nginx (web page + proxy), the Flask API, and PostgreSQL.
+#   docker compose up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Create a .env file (copy .env.example)}
+      POSTGRES_DB: tododb
+    volumes:
+      - pgdata:/var/lib/postgresql/data      # data survives container restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todo -d tododb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://todo:${POSTGRES_PASSWORD}@db:5432/tododb
+      APP_VERSION: ${APP_VERSION:-local}
+    # No "ports" here: the API is private. Only Nginx is reachable from outside.
+    depends_on:
+      db:
+        condition: service_healthy            # wait until Postgres is ready
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+
+volumes:
+  pgdata:

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskBoard</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --text:#1d2433; --muted:#6b7385; --accent:#2f6fed; --line:#e3e6ec; --ok:#1a8f4c; --bad:#c23b3b; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#12151c; --card:#1b202b; --text:#e8ebf2; --muted:#98a1b5; --accent:#6b9bff; --line:#2a3140; --ok:#4cc784; --bad:#ff7a7a; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+    main { max-width: 560px; margin: 0 auto; padding: 32px 16px 64px; }
+    header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; }
+    h1 { font-size: 1.5rem; margin:0; }
+    .status { font-size:.85rem; color:var(--muted); display:flex; align-items:center; gap:6px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+    .dot.up { background:var(--ok); } .dot.down { background:var(--bad); }
+    form { display:flex; gap:8px; margin-bottom:16px; }
+    input[type=text] { flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--text); font-size:1rem; }
+    button { padding:10px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:1rem; cursor:pointer; }
+    button.ghost { background:transparent; color:var(--muted); padding:4px 8px; }
+    ul { list-style:none; margin:0; padding:0; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+    li { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line); }
+    li:last-child { border-bottom:0; }
+    li span { flex:1; word-break:break-word; }
+    li.done span { text-decoration: line-through; color:var(--muted); }
+    .empty { color:var(--muted); padding:16px; text-align:center; }
+    footer { margin-top:20px; color:var(--muted); font-size:.8rem; text-align:center; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>TaskBoard</h1>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">checking…</span></div>
+  </header>
+
+  <form id="addForm">
+    <input id="title" type="text" placeholder="Add a task…" maxlength="200" autocomplete="off" required>
+    <button type="submit">Add</button>
+  </form>
+
+  <ul id="list"></ul>
+  <footer>Frontend (Nginx) → API (Flask/Gunicorn) → PostgreSQL</footer>
+</main>
+
+<script>
+  const API = "/api";
+  const list = document.getElementById("list");
+
+  async function call(path, options) {
+    const res = await fetch(API + path, options);
+    if (!res.ok && res.status !== 204) throw new Error("HTTP " + res.status);
+    return res.status === 204 ? null : res.json();
+  }
+
+  async function checkHealth() {
+    const dot = document.getElementById("dot");
+    const text = document.getElementById("statusText");
+    try {
+      await call("/health");
+      dot.className = "dot up"; text.textContent = "API and database up";
+    } catch (e) {
+      dot.className = "dot down"; text.textContent = "API unreachable";
+    }
+  }
+
+  async function load() {
+    let todos = [];
+    try { todos = await call("/todos"); } catch (e) { /* shown by health indicator */ }
+    list.innerHTML = "";
+    if (todos.length === 0) {
+      list.innerHTML = '<li class="empty">No tasks yet. Add your first one above.</li>';
+      return;
+    }
+    for (const t of todos) {
+      const li = document.createElement("li");
+      if (t.done) li.className = "done";
+
+      const box = document.createElement("input");
+      box.type = "checkbox"; box.checked = t.done;
+      box.addEventListener("change", async () => {
+        await call("/todos/" + t.id, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({done: box.checked}) });
+        load();
+      });
+
+      const label = document.createElement("span");
+      label.textContent = t.title;          // textContent, not innerHTML: no script injection
+
+      const del = document.createElement("button");
+      del.className = "ghost"; del.textContent = "Delete";
+      del.addEventListener("click", async () => {
+        await call("/todos/" + t.id, { method: "DELETE" });
+        load();
+      });
+
+      li.append(box, label, del);
+      list.appendChild(li);
+    }
+  }
+
+  document.getElementById("addForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("title");
+    const title = input.value.trim();
+    if (!title) return;
+    await call("/todos", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({title}) });
+    input.value = "";
+    load();
+  });
+
+  checkHealth(); load();
+  setInterval(checkHealth, 15000);
+</script>
+</body>
+</html>
